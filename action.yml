@@ -1,0 +1,23 @@
+name: 'Auto Fork Sync'
+description: 'Automates synchronization of forked repos with upstream via configurable merge strategies.'
+author: 'Your Name'
+inputs:
+  github_token:
+    description: 'GitHub token with repo permissions'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+    - name: Install dependencies
+      run: pip install PyGithub GitPython PyYAML
+    - name: Run Auto Fork Sync
+      run: python auto_fork_sync.py
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
