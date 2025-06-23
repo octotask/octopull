@@ -1,0 +1,8 @@
+sync_strategy: rebase
+default_branch: main
+upstream: https://github.com/original/repo.git
+assignees:
+  - your-username
+reviewers:
+  - reviewer1
+  - reviewer2
