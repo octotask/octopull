@@ -1,5 +1,9 @@
 sync_strategy: rebase
 default_branch: main
+branches_to_sync:
+  - main
+  - develop
+  - release/v1.0
 upstream: https://github.com/octotask/octopull.git
 assignees:
   - khulnasoft-bot
