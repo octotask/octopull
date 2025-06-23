@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name='auto-fork-sync',
+    name='octopull',
     version='0.1.0',
     py_modules=['auto_fork_sync'],
     install_requires=[
