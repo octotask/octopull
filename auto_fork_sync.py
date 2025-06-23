@@ -7,7 +7,7 @@ import datetime
 from github import Github, GithubException
 
 CONFIG_FILE = ".github/pull.yml"
-AUTO_CLOSE_ON_CONFLICT = False  # Set True to auto-close conflicted PRs
+AUTO_CLOSE_ON_CONFLICT = True  # Auto-close conflicted PRs, change as needed
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -22,14 +22,13 @@ def run(cmd, cwd=None):
     return success, result.stdout.strip() + "\n" + result.stderr.strip()
 
 def create_or_update_pr(gh_repo, head_branch, base_branch, strategy, config):
-    # Check if a PR from this branch to base_branch exists
     pulls = gh_repo.get_pulls(state="open", head=f"{gh_repo.owner.login}:{head_branch}", base=base_branch)
     pr = pulls[0] if pulls.totalCount > 0 else None
 
     if not pr:
         pr = gh_repo.create_pull(
-            title=f"Sync with upstream ({strategy})",
-            body="This PR syncs the fork with upstream.",
+            title=f"Sync with upstream (branch: {base_branch}, strategy: {strategy})",
+            body=f"This PR syncs the fork branch `{base_branch}` with upstream using `{strategy}` strategy.",
             head=head_branch,
             base=base_branch
         )
@@ -37,7 +36,6 @@ def create_or_update_pr(gh_repo, head_branch, base_branch, strategy, config):
     else:
         print(f"Using existing PR: {pr.html_url}")
 
-    # Assign reviewers and assignees if configured
     assignees = config.get("assignees", [])
     if assignees:
         try:
@@ -71,13 +69,9 @@ def handle_conflict(pr, conflict_output):
     except GithubException as e:
         print(f"Failed to comment/label PR: {e}")
 
-def sync_fork(config):
-    repo_url = subprocess.run("git config --get remote.origin.url", shell=True, capture_output=True, text=True).stdout.strip()
-    upstream_url = config['upstream']
-    default_branch = config.get('default_branch', 'main')
-    strategy = config.get('sync_strategy', 'merge')
+def sync_branch(repo_url, upstream_url, gh_repo, config, branch, strategy):
     timestamp = datetime.datetime.utcnow().strftime("%Y%m%d%H%M")
-    sync_branch = f"sync-upstream-{timestamp}"
+    sync_branch = f"sync-upstream-{branch}-{timestamp}"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Clone the fork repo
@@ -85,61 +79,68 @@ def sync_fork(config):
         run(f"git remote add upstream {upstream_url}", cwd=tmpdir)
         run("git fetch upstream", cwd=tmpdir)
 
-        # Prepare the sync branch
+        # Checkout sync branch based on strategy
         if strategy in ("merge", "rebase", "squash"):
-            run(f"git checkout -b {sync_branch} origin/{default_branch}", cwd=tmpdir)
+            run(f"git checkout -b {sync_branch} origin/{branch}", cwd=tmpdir)
         elif strategy == "hard-reset":
-            # Hard reset directly to upstream branch
-            run(f"git checkout -B {sync_branch} upstream/{default_branch}", cwd=tmpdir)
+            run(f"git checkout -B {sync_branch} upstream/{branch}", cwd=tmpdir)
         else:
             print(f"Unsupported strategy: {strategy}")
             sys.exit(1)
 
-        # Perform sync with conflict detection
         conflict_output = ""
+        # Perform sync
         if strategy == "merge":
-            success, output = run(f"git merge upstream/{default_branch} --no-edit", cwd=tmpdir)
+            success, output = run(f"git merge upstream/{branch} --no-edit", cwd=tmpdir)
             if not success:
                 conflict_output = output
         elif strategy == "rebase":
-            success, output = run(f"git rebase upstream/{default_branch}", cwd=tmpdir)
+            success, output = run(f"git rebase upstream/{branch}", cwd=tmpdir)
             if not success:
                 conflict_output = output
         elif strategy == "squash":
-            success, output = run(f"git merge --squash upstream/{default_branch}", cwd=tmpdir)
+            success, output = run(f"git merge --squash upstream/{branch}", cwd=tmpdir)
             if not success:
                 conflict_output = output
             else:
-                # Commit the squash merge
                 success, output = run('git commit -m "Squash merge upstream changes"', cwd=tmpdir)
                 if not success:
                     conflict_output = output
         elif strategy == "hard-reset":
-            success = True  # no merge, no conflict possible
+            success = True
         else:
             print(f"Unsupported strategy: {strategy}")
             sys.exit(1)
 
-        # If conflict detected, push branch anyway to create PR with conflict info
         if conflict_output:
-            print("Conflict detected during sync!")
+            print(f"Conflict detected on branch {branch}")
         else:
-            print("Sync successful, pushing changes.")
+            print(f"Sync successful on branch {branch}")
 
         run(f"git push origin {sync_branch}", cwd=tmpdir)
 
-        token = os.getenv("GITHUB_TOKEN")
-        if not token:
-            print("GITHUB_TOKEN env variable is required")
-            sys.exit(1)
-
-        gh = Github(token, base_url=os.getenv("GITHUB_API", "https://api.github.com"))
-        gh_repo = gh.get_repo(os.getenv("GITHUB_REPOSITORY"))
-
-        pr = create_or_update_pr(gh_repo, sync_branch, default_branch, strategy, config)
+        pr = create_or_update_pr(gh_repo, sync_branch, branch, strategy, config)
 
         if conflict_output:
             handle_conflict(pr, conflict_output)
+
+def sync_fork(config):
+    repo_url = subprocess.run("git config --get remote.origin.url", shell=True, capture_output=True, text=True).stdout.strip()
+    upstream_url = config['upstream']
+    strategy = config.get('sync_strategy', 'merge')
+    branches = config.get("branches_to_sync") or [config.get("default_branch", "main")]
+
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        print("GITHUB_TOKEN env variable is required")
+        sys.exit(1)
+
+    gh = Github(token, base_url=os.getenv("GITHUB_API", "https://api.github.com"))
+    gh_repo = gh.get_repo(os.getenv("GITHUB_REPOSITORY"))
+
+    for branch in branches:
+        print(f"Starting sync for branch: {branch}")
+        sync_branch(repo_url, upstream_url, gh_repo, config, branch, strategy)
 
 if __name__ == "__main__":
     config = load_config()
