@@ -1,8 +1,7 @@
 sync_strategy: rebase
 default_branch: main
-upstream: https://github.com/original/repo.git
+upstream: https://github.com/octotask/octopull.git
 assignees:
-  - your-username
+  - khulnasoft-bot
 reviewers:
-  - reviewer1
-  - reviewer2
+  - gitworkflows
